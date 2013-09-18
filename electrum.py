@@ -1,12 +1,17 @@
 import random
-from libs.pycoin import bitcoin
-from libs.pycoin.bitcoin import is_valid, Transaction
+from . import bitcoin
+from .bitcoin import is_valid, Transaction
 import requests
 import re
 import json
 
-SERVER = 'http://electrum.no-ip.org/'
+SERVER = 'http://54.200.53.221:8081/'
 FEE_PER_KB = 20000
+
+def update_tx_outputs(tx, prevout_values):
+    for i, (addr, value) in enumerate(tx.outputs):
+        key = tx.hash() + ':%d' % i
+        prevout_values[key] = value
 
 class ElectrumClient(object):
     def __init__(self, server=None):
@@ -51,7 +56,7 @@ class ElectrumClient(object):
             {'params': [address], 'method': 'blockchain.address.get_history'},
         ]
         r = self.call_server(m)
-        return r.json['result']
+        return r.json()['result']
 
     def get_transaction(self, transaction, height):
         #start session
@@ -59,7 +64,7 @@ class ElectrumClient(object):
             {'params': [transaction, height], 'method': 'blockchain.transaction.get'},
         ]
         r = self.call_server(m)
-        return r.json['result']
+        return r.json()['result']
 
     def broadcast(self, tx_hash):
         m = [{
@@ -67,4 +72,64 @@ class ElectrumClient(object):
             'method': 'blockchain.transaction.get'
         }]
         r = self.call_server(m)
-        return r.json['result']
+        return r.json()['result']
+
+
+    def get_balance(self, address):
+        prevout_values = {}
+        h = self.get_history(address)
+        if h == ['*']:
+            return 0, 0
+        c = u = 0
+        received_coins = []   # list of coins received at address
+        transactions = {}
+
+        # fetch transactions
+        for t in h:
+            tx_hash = t['tx_hash']
+            tx_height = t['height']
+
+            transactions[(tx_hash, tx_height)] = self.get_transaction(tx_hash, tx_height)
+
+        for t in h:
+            tx_hash = t['tx_hash']
+            tx_height = t['height']
+
+            tx = Transaction(transactions[(tx_hash, tx_height)])
+
+            if not tx:
+                continue
+
+            update_tx_outputs(tx, prevout_values)
+            for i, (addr, value) in enumerate(tx.outputs):
+                if addr == address:
+                    key = tx_hash + ':%d' % i
+                    received_coins.append(key)
+
+        for t in h:
+            tx_hash = t['tx_hash']
+            tx_height = t['height']
+
+            tx = Transaction(transactions[(tx_hash, tx_height)])
+
+            if not tx:
+                continue
+            v = 0
+
+            for item in tx.inputs:
+                addr = item.get('address')
+                if addr == address:
+                    key = item['prevout_hash'] + ':%d' % item['prevout_n']
+                    value = prevout_values.get(key)
+                    if key in received_coins:
+                        v -= value
+            for i, (addr, value) in enumerate(tx.outputs):
+                key = tx_hash + ':%d' % i
+                if addr == address:
+                    v += value
+            if tx_height:
+                c += v
+            else:
+                u += v
+        return c, u
+
