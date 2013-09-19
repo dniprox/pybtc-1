@@ -1,9 +1,14 @@
+
+import logging
+
 import random
 from . import bitcoin
 from .bitcoin import is_valid, Transaction
 import requests
 import re
 import json
+import time
+
 
 SERVER = 'http://54.200.53.221:8081/'
 FEE_PER_KB = 20000
@@ -14,10 +19,11 @@ def update_tx_outputs(tx, prevout_values):
         prevout_values[key] = value
 
 class ElectrumClient(object):
-    def __init__(self, server=None):
+    def __init__(self, server=None, cache=None):
         self.message_id = 1
         self.server = server if server else SERVER
         self.session = self.get_session()
+        self.cache = cache
 
     def get_session(self):
         headers = {'Content-Type': 'application/json-rpc'}
@@ -41,9 +47,20 @@ class ElectrumClient(object):
             self.message_id += 1
 
         #call once to send the message
-        r = requests.post(self.server, data=json.dumps(messages), headers=headers, cookies=cookies)
+
         #call again to get the response
-        r = requests.post(self.server, data=json.dumps([]), headers=headers, cookies=cookies)
+        logging.info(messages)
+
+        for i in range(3):
+            r = requests.post(self.server, data=json.dumps(messages), headers=headers, cookies=cookies)
+            time.sleep(0.01)
+            r = requests.post(self.server, data=json.dumps([]), headers=headers, cookies=cookies)
+            if r.content != "":
+                break
+            else:
+                logging.error("retry!")
+
+
         if r.status_code != 200:
             raise Exception("error calling electrum server")
 
@@ -59,12 +76,24 @@ class ElectrumClient(object):
         return r.json()['result']
 
     def get_transaction(self, transaction, height):
+
+        cache_key = "%s%s" % (transaction, height)
+        if self.cache:
+            cached = self.cache.get(cache_key)
+            if cached:
+                return cached
+
         #start session
         m = [
             {'params': [transaction, height], 'method': 'blockchain.transaction.get'},
         ]
         r = self.call_server(m)
-        return r.json()['result']
+        v = r.json()['result']
+
+        if self.cache:
+            self.cache.set(cache_key, v, 30 * 86300)
+
+        return v
 
     def broadcast(self, tx_hash):
         m = [{
