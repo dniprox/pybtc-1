@@ -10,7 +10,7 @@ import json
 import time
 
 
-SERVER = 'http://54.200.53.221:8081/'
+SERVER = 'http://localhost:8081/'
 FEE_PER_KB = 20000
 
 def update_tx_outputs(tx, prevout_values):
