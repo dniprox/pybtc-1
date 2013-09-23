@@ -98,7 +98,7 @@ class ElectrumClient(object):
     def broadcast(self, tx_hash):
         m = [{
             'params': [tx_hash],
-            'method': 'blockchain.transaction.get'
+            'method': 'blockchain.transaction.broadcast'
         }]
         r = self.call_server(m)
         return r.json()['result']
